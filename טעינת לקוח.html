@@ -288,6 +288,91 @@
             border: 1px solid currentColor;
             margin-top: 10px;
         }
+
+        /* התאמה לסלולר - מסכי מימוש */
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                max-width: 100%;
+            }
+
+            .card {
+                padding: 12px;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 8px;
+                text-align: center;
+            }
+
+            .store-info {
+                text-align: center;
+            }
+
+            .search-box {
+                flex-direction: column;
+            }
+
+            .search-box button {
+                width: 100%;
+            }
+
+            .customer-grid {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            .customer-grid.contact {
+                grid-template-columns: 1fr;
+            }
+
+            .period-selection {
+                padding: 12px;
+            }
+
+            .period-option {
+                padding: 12px;
+            }
+
+            .period-option-type {
+                font-size: 16px;
+            }
+
+            .period-option-balance {
+                font-size: 15px;
+            }
+
+            .period-option-details {
+                font-size: 13px;
+            }
+
+            .redemption-history {
+                font-size: 13px;
+            }
+
+            .redemption-history th,
+            .redemption-history td {
+                padding: 5px 4px;
+            }
+
+            .admin-buttons {
+                flex-wrap: wrap;
+            }
+
+            #redeemButton {
+                font-size: 16px;
+                padding: 14px 20px;
+            }
+
+            .back-to-periods-btn {
+                font-size: 14px;
+                padding: 10px 16px;
+            }
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -324,7 +409,7 @@
                 <div id="success" class="success" style="display: none;"></div>
 
                 <div class="search-box">
-                    <input type="text" id="customerIdInput" placeholder="חפש לפי מספר לקוח או טלפון...">
+                    <input type="text" id="customerIdInput" placeholder="חפש לפי מספר לקוח או טלפון..." onkeydown="if(event.key==='Enter')handleSearch()">
                     <button onclick="handleSearch()">חפש</button>
                 </div>
 
@@ -1476,172 +1561,23 @@
         }
 
         // פונקציה לניסיון מחדש של לקוחות שנכשלו
+        // ניסיון מחדש של לקוחות שנכשלו - משתמש באותה לוגיקה של processCustomersImport
         async function retryFailedCustomers(failedCustomers) {
             if (!failedCustomers || failedCustomers.length === 0) {
                 showError('אין לקוחות לניסיון מחדש');
                 return;
             }
-            
+
             showSuccess(`מנסה לקלוט ${failedCustomers.length} לקוחות שנכשלו...`);
-            
-            let retrySuccessCount = 0;
-            let stillFailedCustomers = [];
-            
-            // עיבוד כל לקוח שנכשל
-            for (const failedCustomer of failedCustomers) {
-                try {
-                    // המרת הנתונים בחזרה לאובייקט אם נשמרו כמחרוזת JSON
-                    let customerData = failedCustomer.rowData ? 
-                        JSON.parse(failedCustomer.rowData) : 
-                        { 
-                            id: failedCustomer.id, 
-                            name: failedCustomer.name
-                        };
-                    
-                    const customerId = customerData.id.toString();
-                    
-                    // בדיקה אם הלקוח קיים באמצעות שאילתה ממוקדת
-                    const query = {
-                        structuredQuery: {
-                            from: [{ collectionId: 'customers' }],
-                            where: {
-                                fieldFilter: {
-                                    field: { fieldPath: 'id' },
-                                    op: 'EQUAL',
-                                    value: { stringValue: customerId }
-                                }
-                            }
-                        }
-                    };
-                    
-                    const response = await fetch(`${FIRESTORE_URL}:runQuery`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(query)
-                    });
-                    
-                    const results = await response.json();
-                    const existingCustomer = results.filter(result => result.document)[0]?.document || null;
 
-                    if (existingCustomer) {
-                        // הלקוח קיים - עדכון
-                        const existingId = existingCustomer.name.split('/').pop();
-                        const currentTotalItems = parseInt(existingCustomer.fields.totalItems.integerValue || '0');
-                        const additionalItems = parseInt(customerData.totalItems) || 0;
-                        const newTotalItems = currentTotalItems + additionalItems;
-                        
-                        const updateDoc = {
-                            fields: {
-                                totalItems: { integerValue: newTotalItems.toString() }
-                            }
-                        };
-                        
-                        const updateResponse = await fetch(
-                            `${FIRESTORE_URL}/customers/${existingId}?updateMask.fieldPaths=totalItems`,
-                            {
-                                method: 'PATCH',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify(updateDoc)
-                            }
-                        );
-                        
-                        if (updateResponse.ok) {
-                            retrySuccessCount++;
-                        } else {
-                            throw new Error('שגיאה בעדכון הלקוח');
-                        }
-                    } else {
-                        // לקוח חדש - הוספה
-                        const customerDoc = {
-                            fields: {
-                                id: { stringValue: customerId },
-                                name: { stringValue: customerData.name || '' },
-                                address: { stringValue: customerData.address || '' },
-                                totalItems: { integerValue: (customerData.totalItems || 0).toString() },
-                                phone1: { stringValue: customerData.phone1?.toString() || '' },
-                                phone2: { stringValue: customerData.phone2?.toString() || '' },
-                                customerType: { stringValue: customerData.customerType || 'רגיל' },
-                                usedItems: { integerValue: '0' }
-                            }
-                        };
+            // המרת הנתונים בחזרה לאובייקטים
+            const customersToRetry = failedCustomers.map(fc => {
+                const data = fc.rowData ? JSON.parse(fc.rowData) : { id: fc.id, name: fc.name };
+                return data;
+            });
 
-                        const createResponse = await fetch(
-                            `${FIRESTORE_URL}/customers`,
-                            {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify(customerDoc)
-                            }
-                        );
-                        
-                        if (createResponse.ok) {
-                            retrySuccessCount++;
-                        } else {
-                            throw new Error('שגיאה בהוספת הלקוח');
-                        }
-                    }
-                    
-                    // המתנה קצרה בין בקשות
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                    
-                } catch (error) {
-                    console.error('Error retrying customer:', failedCustomer.id, error);
-                    
-                    // הוספת הלקוח לרשימת הלקוחות שעדיין נכשלים
-                    stillFailedCustomers.push({
-                        ...failedCustomer,
-                        error: error.message || 'שגיאה לא ידועה בניסיון חוזר'
-                    });
-                }
-            }
-            
-            // הצגת סיכום
-            if (stillFailedCustomers.length === 0) {
-                showSuccess(`כל ${retrySuccessCount} הלקוחות נקלטו בהצלחה בניסיון החוזר!`);
-            } else {
-                // אם עדיין יש לקוחות שנכשלו, הצג הודעה ואפשר לנסות שוב
-                showError(`נקלטו ${retrySuccessCount} לקוחות בניסיון החוזר. ${stillFailedCustomers.length} לקוחות עדיין נכשלו.`);
-                
-                // שמירת הלקוחות שעדיין נכשלו לניסיון נוסף
-                window.lastFailedCustomers = stillFailedCustomers;
-                
-                // יצירת כפתור לניסיון נוסף
-                const retryAgainButton = document.createElement('button');
-                retryAgainButton.innerText = 'נסה שוב לקלוט את הלקוחות שנכשלו';
-                retryAgainButton.className = 'secondary';
-                retryAgainButton.style.marginTop = '10px';
-                retryAgainButton.onclick = () => retryFailedCustomers(window.lastFailedCustomers);
-                
-                // הוספת הכפתור לממשק
-                const adminButtons = document.getElementById('adminButtons');
-                // הסרת כפתור קודם אם קיים
-                const existingRetryButton = adminButtons.querySelector('.retry-button');
-                if (existingRetryButton) {
-                    adminButtons.removeChild(existingRetryButton);
-                }
-                retryAgainButton.classList.add('retry-button');
-                adminButtons.appendChild(retryAgainButton);
-                
-                // הורדת קובץ CSV עם הלקוחות שעדיין נכשלים
-                const errorLogContent = [
-                    ['מזהה לקוח', 'שם לקוח', 'סוג שגיאה', 'פירוט שגיאה'],
-                    ...stillFailedCustomers.map(c => [c.id, c.name, c.errorType || '', c.error])
-                ].map(row => row.join(',')).join('\n');
-                
-                const blob = new Blob([errorLogContent], { type: 'text/csv' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `שגיאות_קליטה_ניסיון_חוזר_${new Date().toISOString().slice(0,10)}.csv`;
-                a.click();
-                URL.revokeObjectURL(url);
-            }
+            // שימוש באותה פונקציית יבוא
+            await processCustomersImport(customersToRetry);
         }
 
         // העלאת קובץ אקסל - פונקציה מעודכנת
