@@ -230,6 +230,64 @@
         .action-column {
             width: 100px;
         }
+
+        /* מסך בחירת תקופות */
+        .period-selection {
+            display: none;
+            background: #f8f8f8;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .period-options {
+            display: grid;
+            gap: 10px;
+        }
+
+        .period-option {
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .period-option:hover {
+            border-color: #2563eb;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+        }
+
+        .period-option-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .period-option-type {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .period-option-balance {
+            font-size: 16px;
+            font-weight: 500;
+            color: #2563eb;
+        }
+
+        .period-option-details {
+            font-size: 14px;
+            color: #666;
+            margin-top: 8px;
+        }
+
+        .back-to-periods-btn {
+            background: transparent;
+            color: #2563eb;
+            border: 1px solid currentColor;
+            margin-top: 10px;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
@@ -322,6 +380,13 @@
                         </div>
                     </div>
                 </div>
+
+                <div id="periodSelection" class="period-selection">
+                    <h3>בחר תקופה למימוש:</h3>
+                    <div id="periodOptions" class="period-options">
+                        <!-- כרטיסי תקופות ייווצרו דינמית -->
+                    </div>
+                </div>
             </div>
 
             <div class="admin-buttons" style="display: none;" id="adminButtons">
@@ -412,6 +477,7 @@
         let currentRedemptions = [];
         let parsedCustomers = []; // הלקוחות שנקראו מהקובץ
         let existingCustomersMap = {}; // מיפוי של לקוחות קיימים
+        let allCustomerPeriods = []; // כל התקופות שנמצאו בחיפוש
 
         // הוסף כאן - קוד ניטור קריאות פיירסטור
         let firebaseReadCount = 0;
@@ -554,10 +620,10 @@
             setInterval(updateClock, 60000);
         }
 
-        // חיפוש לקוח - פונקציה מעודכנת
+        // חיפוש לקוח - פונקציה מעודכנת עם תמיכה במספר תקופות
         async function handleSearch() {
             if (isProcessing) return;
-            
+
             const searchTerm = document.getElementById('customerIdInput').value.trim();
             if (!searchTerm) {
                 showError('נא להזין מספר לקוח או טלפון');
@@ -601,42 +667,110 @@
                     }
                 };
 
-                // שליחת השאילתה
-                let response = await fetch(`${FIRESTORE_URL}:runQuery`, {
+                const response = await fetch(`${FIRESTORE_URL}:runQuery`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(structuredQuery)
                 });
-                
-                let results = await response.json();
-                
-                // בדיקה אם נמצאו תוצאות
+
+                const results = await response.json();
                 const validResults = results.filter(result => result.document);
-                
+
                 if (validResults.length === 0) {
                     showError('לקוח לא נמצא');
                     document.getElementById('customerInfo').style.display = 'none';
+                    document.getElementById('periodSelection').style.display = 'none';
                     return;
                 }
-                
-                const customer = validResults[0].document;
-                
-                // מעדכן את המשתנה הגלובלי עם פרטי הלקוח
-                currentCustomer = {
-                    id: customer.name.split('/').pop(),
-                    name: customer.fields.name.stringValue,
-                    totalItems: parseInt(customer.fields.totalItems.integerValue || '0'),
-                    usedItems: parseInt(customer.fields.usedItems.integerValue || '0'),
-                    phone1: customer.fields?.phone1?.stringValue || '',
-                    phone2: customer.fields?.phone2?.stringValue || '',
-                    address: customer.fields?.address?.stringValue || '',
-                    lastUsed: customer.fields.lastUsed?.timestampValue,
-                    customerType: customer.fields.customerType?.stringValue || 'רגיל'
-                };
 
-                // חיפוש ישיר של מימושים של הלקוח
+                // מיפוי כל התוצאות לאובייקטי לקוח
+                const allPeriods = validResults.map(result => {
+                    const doc = result.document;
+                    return {
+                        firestoreDocId: doc.name.split('/').pop(),
+                        id: doc.fields.id?.stringValue || '',
+                        name: doc.fields.name?.stringValue || '',
+                        totalItems: parseInt(doc.fields.totalItems?.integerValue || '0'),
+                        usedItems: parseInt(doc.fields.usedItems?.integerValue || '0'),
+                        phone1: doc.fields?.phone1?.stringValue || '',
+                        phone2: doc.fields?.phone2?.stringValue || '',
+                        address: doc.fields?.address?.stringValue || '',
+                        lastUsed: doc.fields.lastUsed?.timestampValue,
+                        customerType: doc.fields.customerType?.stringValue || 'רגיל'
+                    };
+                });
+
+                // סינון רק תקופות עם יתרה > 0
+                const periodsWithBalance = allPeriods.filter(p => (p.totalItems - p.usedItems) > 0);
+
+                // שמירה גלובלית של כל התקופות (כולל עם יתרה 0, לצורך כפתור חזרה)
+                allCustomerPeriods = allPeriods;
+
+                if (periodsWithBalance.length === 0) {
+                    showError('לא נמצאו תקופות עם יתרה למימוש');
+                    document.getElementById('customerInfo').style.display = 'none';
+                    document.getElementById('periodSelection').style.display = 'none';
+                    return;
+                }
+
+                if (periodsWithBalance.length === 1) {
+                    // תקופה אחת - הצג ישירות
+                    await loadAndDisplayCustomer(periodsWithBalance[0]);
+                } else {
+                    // מספר תקופות - הצג מסך בחירה
+                    displayPeriodSelection(periodsWithBalance);
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                showError('שגיאה בחיפוש הלקוח');
+            } finally {
+                isProcessing = false;
+            }
+        }
+
+        // הצגת מסך בחירת תקופות
+        function displayPeriodSelection(periods) {
+            document.getElementById('customerInfo').style.display = 'none';
+            const periodSelection = document.getElementById('periodSelection');
+            const periodOptions = document.getElementById('periodOptions');
+
+            periodOptions.innerHTML = '';
+
+            periods.forEach((period, index) => {
+                const balance = period.totalItems - period.usedItems;
+                const card = document.createElement('div');
+                card.className = 'period-option';
+                card.onclick = () => selectPeriod(period);
+                card.innerHTML = `
+                    <div class="period-option-header">
+                        <div class="period-option-type">${period.customerType}</div>
+                        <div class="period-option-balance">יתרה: ${balance}</div>
+                    </div>
+                    <div class="period-option-details">
+                        ${period.name} • סך כל הפריטים: ${period.totalItems} • מומש: ${period.usedItems}
+                    </div>
+                `;
+                periodOptions.appendChild(card);
+            });
+
+            periodSelection.style.display = 'block';
+        }
+
+        // בחירת תקופה מהמסך
+        async function selectPeriod(period) {
+            document.getElementById('periodSelection').style.display = 'none';
+            await loadAndDisplayCustomer(period);
+        }
+
+        // טעינה והצגה של לקוח ספציפי (תקופה ספציפית)
+        async function loadAndDisplayCustomer(customer) {
+            try {
+                currentCustomer = customer;
+
+                // חיפוש מימושים של הלקוח (לפי Firestore document ID)
                 const redemptionsQuery = {
                     structuredQuery: {
                         from: [{ collectionId: 'redemptions' }],
@@ -644,33 +778,42 @@
                             fieldFilter: {
                                 field: { fieldPath: 'customerId' },
                                 op: 'EQUAL',
-                                value: { stringValue: currentCustomer.id }
+                                value: { stringValue: customer.firestoreDocId }
                             }
                         }
                     }
                 };
-                
-                response = await fetch(`${FIRESTORE_URL}:runQuery`, {
+
+                const response = await fetch(`${FIRESTORE_URL}:runQuery`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(redemptionsQuery)
                 });
-                
-                results = await response.json();
-                
+
+                const results = await response.json();
+
                 currentRedemptions = results
                     .filter(result => result.document)
                     .map(result => result.document);
-                
-                displayCustomerInfo(currentCustomer, currentRedemptions);
 
+                displayCustomerInfo(currentCustomer, currentRedemptions);
             } catch (error) {
-                console.error('Error:', error);
-                showError('שגיאה בחיפוש הלקוח');
-            } finally {
-                isProcessing = false;
+                console.error('Error loading customer:', error);
+                showError('שגיאה בטעינת פרטי הלקוח');
+            }
+        }
+
+        // חזרה למסך בחירת תקופות
+        function backToPeriods() {
+            document.getElementById('customerInfo').style.display = 'none';
+            // סינון תקופות עם יתרה
+            const periodsWithBalance = allCustomerPeriods.filter(p => (p.totalItems - p.usedItems) > 0);
+            if (periodsWithBalance.length > 0) {
+                displayPeriodSelection(periodsWithBalance);
+            } else {
+                showError('לא נמצאו תקופות עם יתרה למימוש');
             }
         }
 
@@ -702,14 +845,36 @@
             });
 
             document.getElementById('customerInfo').style.display = 'block';
-            document.getElementById('redeemButton').disabled = 
+            document.getElementById('redeemButton').disabled =
                 customer.usedItems >= customer.totalItems;
+
+            // כפתור חזרה לבחירת תקופות - מוצג רק אם יש 2+ תקופות עם יתרה
+            updateBackToPeriodButton();
+        }
+
+        // עדכון כפתור חזרה לתקופות
+        function updateBackToPeriodButton() {
+            // הסרת כפתור קודם אם קיים
+            const existingBtn = document.getElementById('backToPeriodsBtn');
+            if (existingBtn) existingBtn.remove();
+
+            const periodsWithBalance = allCustomerPeriods.filter(p => (p.totalItems - p.usedItems) > 0);
+            if (periodsWithBalance.length >= 2) {
+                const btn = document.createElement('button');
+                btn.id = 'backToPeriodsBtn';
+                btn.className = 'back-to-periods-btn';
+                btn.textContent = 'חזרה לבחירת תקופה';
+                btn.onclick = backToPeriods;
+                // הוספה אחרי כפתור המימוש
+                const redeemBtn = document.getElementById('redeemButton');
+                redeemBtn.parentNode.insertBefore(btn, redeemBtn.nextSibling);
+            }
         }
 
         // מימוש פריט
         async function handleRedeem() {
             if (isProcessing || !currentCustomer) return;
-            
+
             if (currentCustomer.usedItems >= currentCustomer.totalItems) {
                 showError('לא נותרו פריטים למימוש');
                 return;
@@ -721,11 +886,13 @@
             redeemButton.disabled = true;
 
             try {
+                const docId = currentCustomer.firestoreDocId;
+
                 // בדיקת מצב עדכני של הלקוח
-                const checkResponse = await fetch(`${FIRESTORE_URL}/customers/${currentCustomer.id}`);
+                const checkResponse = await fetch(`${FIRESTORE_URL}/customers/${docId}`);
                 const checkData = await checkResponse.json();
                 const currentUsedItems = parseInt(checkData.fields.usedItems.integerValue || '0');
-                
+
                 if (currentUsedItems >= currentCustomer.totalItems) {
                     throw new Error('לא נותרו פריטים למימוש');
                 }
@@ -739,7 +906,7 @@
                 };
 
                 const updateResponse = await fetch(
-                    `${FIRESTORE_URL}/customers/${currentCustomer.id}?updateMask.fieldPaths=usedItems&updateMask.fieldPaths=lastUsed`,
+                    `${FIRESTORE_URL}/customers/${docId}?updateMask.fieldPaths=usedItems&updateMask.fieldPaths=lastUsed`,
                     {
                         method: 'PATCH',
                         headers: {
@@ -756,7 +923,7 @@
                 // הוספת רשומת מימוש
                 const redemptionDoc = {
                     fields: {
-                        customerId: { stringValue: currentCustomer.id.split('/').pop() },
+                        customerId: { stringValue: docId },
                         customerName: { stringValue: currentCustomer.name },
                         storeName: { stringValue: currentStore },
                         employeeName: { stringValue: currentEmployee },
@@ -784,13 +951,21 @@
                 currentCustomer.usedItems = currentUsedItems + 1;
                 currentCustomer.lastUsed = new Date().toISOString();
 
+                // עדכון גם במערך allCustomerPeriods
+                const periodInAll = allCustomerPeriods.find(p => p.firestoreDocId === docId);
+                if (periodInAll) {
+                    periodInAll.usedItems = currentCustomer.usedItems;
+                }
+
+                const newBalance = currentCustomer.totalItems - currentCustomer.usedItems;
+
                 // יצירת אובייקט המימוש החדש
                 const newRedemption = {
                     fields: {
                         timestamp: { timestampValue: new Date().toISOString() },
                         storeName: { stringValue: currentStore },
                         employeeName: { stringValue: currentEmployee },
-                        customerId: { stringValue: currentCustomer.id },
+                        customerId: { stringValue: docId },
                         customerName: { stringValue: currentCustomer.name },
                         quantity: { integerValue: "1" }
                     }
@@ -800,12 +975,12 @@
                 currentRedemptions.unshift(newRedemption);
 
                 // עדכון התצוגה של היתרה
-                document.getElementById('itemsBalance').textContent = 
-                    `${currentCustomer.totalItems - currentCustomer.usedItems} מתוך ${currentCustomer.totalItems}`;
+                document.getElementById('itemsBalance').textContent =
+                    `${newBalance} מתוך ${currentCustomer.totalItems}`;
 
                 // עדכון טבלת ההיסטוריה
                 const historyBody = document.getElementById('redemptionHistoryBody');
-const newRow = document.createElement('tr');
+                const newRow = document.createElement('tr');
                 const now = new Date();
                 const { date, time } = formatDate(now.toISOString());
 
@@ -817,13 +992,27 @@ const newRow = document.createElement('tr');
                     <td>1</td>
                 `;
 
-                // הוספת השורה החדשה בראש הטבלה
                 historyBody.insertBefore(newRow, historyBody.firstChild);
 
-                // עדכון כפתור המימוש
-                redeemButton.disabled = currentCustomer.usedItems >= currentCustomer.totalItems;
-
                 showSuccess('המימוש בוצע בהצלחה');
+
+                if (newBalance === 0) {
+                    // היתרה הגיעה ל-0, חזרה למסך בחירת תקופות
+                    redeemButton.disabled = true;
+                    setTimeout(() => {
+                        document.getElementById('customerInfo').style.display = 'none';
+                        // בדיקה אם יש תקופות נוספות עם יתרה
+                        const remainingPeriods = allCustomerPeriods.filter(p => (p.totalItems - p.usedItems) > 0);
+                        if (remainingPeriods.length > 0) {
+                            displayPeriodSelection(remainingPeriods);
+                        } else {
+                            showSuccess('כל הפריטים מומשו בהצלחה!');
+                        }
+                    }, 1000);
+                } else {
+                    redeemButton.disabled = false;
+                    updateBackToPeriodButton();
+                }
 
             } catch (error) {
                 console.error('Error:', error);
@@ -831,7 +1020,6 @@ const newRow = document.createElement('tr');
             } finally {
                 isProcessing = false;
                 redeemButton.textContent = 'מימוש פריט';
-                redeemButton.disabled = false;
             }
         }
 
@@ -900,16 +1088,18 @@ const newRow = document.createElement('tr');
         function updatePreviewSummary() {
             const totalCustomers = parsedCustomers.length;
             const skippedCustomers = parsedCustomers.filter(c => c.skip).length;
-            const newCustomers = parsedCustomers.filter(c => !c.skip && !c.exists).length;
-            const updatedCustomers = parsedCustomers.filter(c => !c.skip && c.exists).length;
+            const newCustomers = parsedCustomers.filter(c => !c.skip && c.importStatus === 'new').length;
+            const newTypeCustomers = parsedCustomers.filter(c => !c.skip && c.importStatus === 'newType').length;
+            const updatedCustomers = parsedCustomers.filter(c => !c.skip && c.importStatus === 'update').length;
             const duplicateIds = parsedCustomers.filter(c => !c.skip && c.duplicateId).length;
-            
+
             document.getElementById('previewSummary').innerHTML = `
                 <div><strong>סה"כ לקוחות בקובץ:</strong> ${totalCustomers}</div>
-                <div><strong>לקוחות חדשים:</strong> ${newCustomers}</div>
-                <div><strong>לקוחות קיימים לעדכון:</strong> ${updatedCustomers}</div>
+                <div><strong>✨ לקוחות חדשים:</strong> ${newCustomers}</div>
+                <div><strong>🆕 סיווגים חדשים:</strong> ${newTypeCustomers}</div>
+                <div><strong>↻ עדכון כמות:</strong> ${updatedCustomers}</div>
                 <div><strong>לקוחות שסומנו לדילוג:</strong> ${skippedCustomers}</div>
-                ${duplicateIds ? `<div class="preview-warning"><strong>שים לב:</strong> יש ${duplicateIds} לקוחות עם מזהה כפול בקובץ</div>` : ''}
+                ${duplicateIds ? `<div class="preview-warning"><strong>שים לב:</strong> יש ${duplicateIds} שורות עם שילוב מזהה+סיווג כפול בקובץ</div>` : ''}
             `;
         }
 
@@ -931,58 +1121,53 @@ const newRow = document.createElement('tr');
             await processCustomersImport(customersToImport);
         }
 
-        // פונקציה לעיבוד קליטת הלקוחות - הפרדנו את העיבוד מהקריאה לקובץ
+        // פונקציה לעיבוד קליטת הלקוחות - עם תמיכה ב-id+customerType
         async function processCustomersImport(customers) {
             try {
                 let updatedCount = 0;
                 let newCount = 0;
+                let newTypeCount = 0;
                 let errorCount = 0;
                 let failedCustomers = [];
-                
-                // הצגת פרוגרס למשתמש
+
                 showSuccess(`מעבד ${customers.length} לקוחות...`);
-                
-                // מקבצים את הלקוחות לקבוצות קטנות לעיבוד
-                const BATCH_SIZE = 20; // כמות לקוחות לעיבוד בכל פעם
+
+                const BATCH_SIZE = 20;
                 const batches = [];
-                
+
                 for (let i = 0; i < customers.length; i += BATCH_SIZE) {
                     batches.push(customers.slice(i, i + BATCH_SIZE));
                 }
-                
-                // עיבוד הקבוצות בזו אחר זו
+
                 for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
                     const batch = batches[batchIndex];
-                    
-                    // מציג התקדמות
+
                     const progress = Math.round((batchIndex / batches.length) * 100);
                     showSuccess(`מעבד לקוחות... ${progress}%`);
-                    
-                    // מעבד כל לקוח בקבוצה
+
                     for (const customer of batch) {
                         try {
                             const customerId = customer.id.toString();
-                            
-                            // בדיקה אם הלקוח כבר קיים - אם כבר בדקנו בתצוגה המקדימה, אפשר להשתמש במידע
-                            const existingCustomerRef = customer.exists ? 
-                                existingCustomersMap[customerId] : null;
+                            const customerName = (customer.name || '').trim();
 
-                            if (existingCustomerRef) {
-                                // הלקוח קיים - עדכון
-                                const existingId = existingCustomerRef.name.split('/').pop();
-                                const currentTotalItems = parseInt(existingCustomerRef.fields.totalItems.integerValue || '0');
-                                const additionalItems = parseInt(customer.totalItems) || 0;
-                                const newTotalItems = currentTotalItems + additionalItems;
-                                
+                            if (customer.importStatus === 'update' && customer.existingDoc) {
+                                // עדכון כמות - אותו id + אותו customerType
+                                const existingId = customer.existingDoc.name.split('/').pop();
+                                const newTotalItems = parseInt(customer.totalItems) || 0;
+
+                                // שמירת usedItems הקיים! רק מעדכנים totalItems + שדות מידע
                                 const updateDoc = {
                                     fields: {
-                                        totalItems: { integerValue: newTotalItems.toString() }
-                                        // אפשר להוסיף כאן עדכונים לשדות אחרים אם צריך
+                                        totalItems: { integerValue: newTotalItems.toString() },
+                                        name: { stringValue: customerName },
+                                        address: { stringValue: customer.address || '' },
+                                        phone1: { stringValue: customer.phone1?.toString() || '' },
+                                        phone2: { stringValue: customer.phone2?.toString() || '' }
                                     }
                                 };
-                                
+
                                 const updateResponse = await fetch(
-                                    `${FIRESTORE_URL}/customers/${existingId}?updateMask.fieldPaths=totalItems`,
+                                    `${FIRESTORE_URL}/customers/${existingId}?updateMask.fieldPaths=totalItems&updateMask.fieldPaths=name&updateMask.fieldPaths=address&updateMask.fieldPaths=phone1&updateMask.fieldPaths=phone2`,
                                     {
                                         method: 'PATCH',
                                         headers: {
@@ -991,18 +1176,18 @@ const newRow = document.createElement('tr');
                                         body: JSON.stringify(updateDoc)
                                     }
                                 );
-                                
+
                                 if (updateResponse.ok) {
                                     updatedCount++;
                                 } else {
                                     throw new Error('שגיאה בעדכון הלקוח');
                                 }
                             } else {
-                                // לקוח חדש - הוספה
+                                // לקוח חדש או סיווג חדש - יצירת רשומה חדשה
                                 const customerDoc = {
                                     fields: {
                                         id: { stringValue: customerId },
-                                        name: { stringValue: customer.name || '' },
+                                        name: { stringValue: customerName },
                                         address: { stringValue: customer.address || '' },
                                         totalItems: { integerValue: (customer.totalItems || 0).toString() },
                                         phone1: { stringValue: customer.phone1?.toString() || '' },
@@ -1022,83 +1207,69 @@ const newRow = document.createElement('tr');
                                         body: JSON.stringify(customerDoc)
                                     }
                                 );
-                                
+
                                 if (createResponse.ok) {
-                                    newCount++;
+                                    if (customer.importStatus === 'newType') {
+                                        newTypeCount++;
+                                    } else {
+                                        newCount++;
+                                    }
                                 } else {
                                     throw new Error('שגיאה בהוספת הלקוח');
                                 }
                             }
-                            
-                            // המתנה קצרה בין בקשות כדי לא להעמיס על השרת
+
                             await new Promise(resolve => setTimeout(resolve, 100));
-                            
+
                         } catch (error) {
                             console.error('Error processing customer:', customer.id, error);
                             errorCount++;
-                            
-                            // בדיקה אם מדובר בשגיאת חיבור או שגיאת נתונים
-                            const errorType = error.name === 'TypeError' || 
-                                            error.message.includes('network') || 
-                                            error.message.includes('connection') ? 
+
+                            const errorType = error.name === 'TypeError' ||
+                                            error.message.includes('network') ||
+                                            error.message.includes('connection') ?
                                             'שגיאת חיבור' : 'שגיאת נתונים';
-                            
-                            // הוספת הלקוח למערך הלקוחות שנכשלו
+
                             failedCustomers.push({
                                 id: customer.id || 'חסר',
                                 name: customer.name || 'חסר',
                                 errorType: errorType,
                                 error: error.message || 'שגיאה לא ידועה',
-                                rowData: JSON.stringify(customer) // שמירת כל הנתונים של השורה
+                                rowData: JSON.stringify(customer)
                             });
-                            
-                            // אם זו שגיאת חיבור, כדאי לחכות קצת יותר זמן לפני הניסיון הבא
+
                             if (errorType === 'שגיאת חיבור') {
-                                await new Promise(resolve => setTimeout(resolve, 1000)); // המתנה ארוכה יותר
+                                await new Promise(resolve => setTimeout(resolve, 1000));
                             }
                         }
                     }
                 }
 
-                // בסוף הפונקציה, אחרי הלולאות של עיבוד הלקוחות:
-                // אם יש לקוחות שנכשלו, הצג אותם בקונסול ובהודעה למשתמש
                 if (failedCustomers.length > 0) {
                     console.error('לקוחות שנכשלו בקליטה:', failedCustomers);
-                    
-                    // יצירת טקסט מפורט של השגיאות
-                    let errorDetails = 'לקוחות שלא נקלטו:\n';
-                    failedCustomers.forEach(customer => {
-                        errorDetails += `- לקוח ${customer.id} (${customer.name}): ${customer.error}\n`;
-                    });
-                    
-                    // שמירת הלקוחות שנכשלו בחלון כדי שאפשר יהיה לנסות שוב
+
                     window.lastFailedCustomers = failedCustomers;
-                    
-                    // הוספת כפתור לניסיון מחדש
+
                     const retryButton = document.createElement('button');
                     retryButton.innerText = 'נסה שוב לקלוט את הלקוחות שנכשלו';
                     retryButton.className = 'secondary';
                     retryButton.style.marginTop = '10px';
                     retryButton.onclick = () => retryFailedCustomers(window.lastFailedCustomers);
-                    
-                    // הוספת הכפתור לממשק
+
                     const adminButtons = document.getElementById('adminButtons');
-                    // הסרת כפתור קודם אם קיים
                     const existingRetryButton = adminButtons.querySelector('.retry-button');
                     if (existingRetryButton) {
                         adminButtons.removeChild(existingRetryButton);
                     }
                     retryButton.classList.add('retry-button');
                     adminButtons.appendChild(retryButton);
-                    
-                    // הצגת חלון התראה עם פרטי השגיאות ואפשרות לניסיון מחדש
+
                     if (confirm(`היו ${failedCustomers.length} שגיאות בקליטת לקוחות.\n\nהאם תרצה להוריד קובץ עם פרטי השגיאות?`)) {
-                        // הורדת קובץ CSV עם פרטי השגיאות
                         const errorLogContent = [
                             ['מזהה לקוח', 'שם לקוח', 'סוג שגיאה', 'פירוט שגיאה'],
                             ...failedCustomers.map(c => [c.id, c.name, c.errorType || '', c.error])
                         ].map(row => row.join(',')).join('\n');
-                        
+
                         const blob = new Blob([errorLogContent], { type: 'text/csv' });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
@@ -1109,39 +1280,40 @@ const newRow = document.createElement('tr');
                     }
                 }
 
-                // הצגת סיכום
-                showSuccess(`נקלטו ${newCount} לקוחות חדשים ועודכנו ${updatedCount} לקוחות קיימים. ${errorCount} שגיאות.`);
-                
+                showSuccess(`נקלטו ${newCount} לקוחות חדשים, ${newTypeCount} סיווגים חדשים, עודכנו ${updatedCount} לקוחות קיימים. ${errorCount} שגיאות.`);
+
             } catch (error) {
                 console.error('Error processing file:', error);
                 showError('שגיאה בעיבוד הקובץ');
             }
         }
 
-        // פונקציה חדשה - בדיקת הלקוחות מול מסד הנתונים ויצירת תצוגה מקדימה
+        // בדיקת הלקוחות מול מסד הנתונים ויצירת תצוגה מקדימה
         async function prepareCustomersPreview(customers) {
             try {
                 showSuccess('בודק נתונים מול מסד הנתונים...');
-                
+
                 // איסוף כל המזהים הייחודיים מהקובץ
                 const uniqueIds = [...new Set(customers.map(c => c.id))];
-                
-                // בדיקה אם יש כפילויות במזהים
-                const idCounts = {};
+
+                // בדיקה אם יש כפילויות לפי id+customerType
+                const idTypeCounts = {};
                 customers.forEach(c => {
-                    idCounts[c.id] = (idCounts[c.id] || 0) + 1;
+                    const key = `${c.id}_${(c.customerType || 'רגיל').trim()}`;
+                    idTypeCounts[key] = (idTypeCounts[key] || 0) + 1;
                 });
-                
-                // סימון לקוחות עם מזהה כפול
+
+                // סימון לקוחות עם שילוב id+customerType כפול בקובץ
                 customers.forEach(c => {
-                    c.duplicateId = idCounts[c.id] > 1;
+                    const key = `${c.id}_${(c.customerType || 'רגיל').trim()}`;
+                    c.duplicateId = idTypeCounts[key] > 1;
                 });
-                
+
                 // בדיקה מול מסד הנתונים - משיכת כל הלקוחות הקיימים עם המזהים האלה
-                for (let i = 0; i < uniqueIds.length; i += 30) { // נחלק לקבוצות של 30 מזהים
+                // existingCustomersMap ישמור מערך של documents לכל id
+                for (let i = 0; i < uniqueIds.length; i += 30) {
                     const batch = uniqueIds.slice(i, i + 30);
-                    
-                    // יצירת שאילתה עם תנאי OR לכל המזהים בקבוצה
+
                     const filters = batch.map(id => ({
                         fieldFilter: {
                             field: { fieldPath: 'id' },
@@ -1149,11 +1321,11 @@ const newRow = document.createElement('tr');
                             value: { stringValue: id.toString() }
                         }
                     }));
-                    
+
                     const query = {
                         structuredQuery: {
                             from: [{ collectionId: 'customers' }],
-                            where: {
+                            where: filters.length === 1 ? filters[0] : {
                                 compositeFilter: {
                                     op: 'OR',
                                     filters: filters
@@ -1161,7 +1333,7 @@ const newRow = document.createElement('tr');
                             }
                         }
                     };
-                    
+
                     const response = await fetch(`${FIRESTORE_URL}:runQuery`, {
                         method: 'POST',
                         headers: {
@@ -1169,55 +1341,78 @@ const newRow = document.createElement('tr');
                         },
                         body: JSON.stringify(query)
                     });
-                    
+
                     const results = await response.json();
                     const foundCustomers = results.filter(result => result.document).map(result => result.document);
-                    
-                    // הוספת הלקוחות שנמצאו למיפוי
+
+                    // הוספת הלקוחות שנמצאו למיפוי - מערך לכל id
                     foundCustomers.forEach(customer => {
                         const customerId = customer.fields.id.stringValue;
-                        existingCustomersMap[customerId] = customer;
+                        if (!existingCustomersMap[customerId]) {
+                            existingCustomersMap[customerId] = [];
+                        }
+                        existingCustomersMap[customerId].push(customer);
                     });
-                    
-                    // עדכון הודעת סטטוס
+
                     const progress = Math.round((i / uniqueIds.length) * 100);
                     showSuccess(`בודק נתונים... ${progress}%`);
                 }
-                
+
                 // עיבוד נתוני הלקוחות והוספת מידע על קיום ואזהרות
                 parsedCustomers = customers.map((customer, index) => {
                     const customerId = customer.id.toString();
-                    const existingCustomer = existingCustomersMap[customerId];
-                    
-                    // סימון אם הלקוח קיים
-                    customer.exists = !!existingCustomer;
-                    
-                    // אזהרות שונות
+                    const customerType = (customer.customerType || 'רגיל').trim();
+                    const existingDocs = existingCustomersMap[customerId] || [];
+
+                    // חיפוש document עם אותו id + אותו customerType
+                    const matchingDoc = existingDocs.find(doc => {
+                        const docType = (doc.fields.customerType?.stringValue || 'רגיל').trim();
+                        return docType === customerType;
+                    });
+
+                    // קביעת סטטוס
+                    if (matchingDoc) {
+                        // אותו id + אותו customerType → עדכון כמות
+                        customer.importStatus = 'update';
+                        customer.existingDoc = matchingDoc;
+                        customer.existingTotalItems = parseInt(matchingDoc.fields.totalItems?.integerValue || '0');
+                        customer.existingUsedItems = parseInt(matchingDoc.fields.usedItems?.integerValue || '0');
+                    } else if (existingDocs.length > 0) {
+                        // אותו id אבל customerType שונה → סיווג חדש
+                        customer.importStatus = 'newType';
+                        customer.existingDoc = null;
+                    } else {
+                        // id חדש לגמרי → לקוח חדש
+                        customer.importStatus = 'new';
+                        customer.existingDoc = null;
+                    }
+
+                    // אזהרות
                     customer.warnings = [];
-                    
+
                     if (!customer.name || customer.name.trim() === '') {
                         customer.warnings.push('שם לקוח חסר');
                     }
-                    
+
                     if (!customer.totalItems || isNaN(customer.totalItems) || customer.totalItems <= 0) {
                         customer.warnings.push('מספר פריטים לא תקין');
                     }
-                    
+
                     if (customer.duplicateId) {
-                        customer.warnings.push('מזהה לקוח מופיע מספר פעמים בקובץ');
+                        customer.warnings.push('שילוב מזהה+סיווג מופיע מספר פעמים בקובץ');
                     }
-                    
+
                     return customer;
                 });
-                
+
                 // הכנת HTML עבור הטבלה
                 const tableBody = document.getElementById('customersPreviewBody');
                 tableBody.innerHTML = '';
-                
+
                 parsedCustomers.forEach((customer, index) => {
                     const row = document.createElement('tr');
                     row.id = `customer-row-${index}`;
-                    
+
                     // הוספת קלאסים על סמך מצב הלקוח
                     if (customer.duplicateId) {
                         row.classList.add('duplicate');
@@ -1226,7 +1421,17 @@ const newRow = document.createElement('tr');
                     } else {
                         row.classList.add('valid');
                     }
-                    
+
+                    // סטטוס לפי סוג הפעולה
+                    let statusHtml = '';
+                    if (customer.importStatus === 'new') {
+                        statusHtml = '<span style="color: #38a169">✨ לקוח חדש</span>';
+                    } else if (customer.importStatus === 'newType') {
+                        statusHtml = '<span style="color: #805ad5">🆕 סיווג חדש</span>';
+                    } else if (customer.importStatus === 'update') {
+                        statusHtml = `<span style="color: #3182ce">↻ עדכון כמות (נוכחי: ${customer.existingTotalItems}, מומש: ${customer.existingUsedItems})</span>`;
+                    }
+
                     row.innerHTML = `
                         <td>${index + 1}</td>
                         <td>${customer.id || ''}</td>
@@ -1237,11 +1442,9 @@ const newRow = document.createElement('tr');
                         <td>${customer.phone2 || ''}</td>
                         <td>${customer.address || ''}</td>
                         <td>
-                            ${customer.exists ? 
-                                `<span style="color: #3182ce">קיים (${existingCustomersMap[customer.id].fields.totalItems.integerValue} פריטים)</span>` : 
-                                '<span style="color: #38a169">חדש</span>'}
-                            ${customer.warnings.length > 0 ? 
-                                `<div style="color: #e53e3e; font-size: 12px;">${customer.warnings.join(', ')}</div>` : 
+                            ${statusHtml}
+                            ${customer.warnings.length > 0 ?
+                                `<div style="color: #e53e3e; font-size: 12px;">${customer.warnings.join(', ')}</div>` :
                                 ''}
                         </td>
                         <td class="action-column">
@@ -1250,18 +1453,18 @@ const newRow = document.createElement('tr');
                             </button>
                         </td>
                     `;
-                    
+
                     tableBody.appendChild(row);
                 });
-                
+
                 // עדכון הסיכום
                 updatePreviewSummary();
-                
+
                 // פתיחת המודל
                 openPreviewModal();
-                
-                showSuccess(''); // ניקוי הודעת סטטוס
-                
+
+                showSuccess('');
+
             } catch (error) {
                 console.error('Error preparing preview:', error);
                 showError('שגיאה בהכנת תצוגה מקדימה');
@@ -1458,13 +1661,13 @@ const newRow = document.createElement('tr');
                         
                         // ניקוי שדות ריקים וטיפול בטיפוסי נתונים
                         const processedCustomers = customers.map(customer => ({
-                            id: customer.id?.toString() || '',
-                            name: customer.name?.toString() || '',
-                            address: customer.address?.toString() || '',
+                            id: customer.id?.toString().trim() || '',
+                            name: (customer.name?.toString() || '').trim().replace(/\s+/g, ' '),
+                            address: customer.address?.toString().trim() || '',
                             totalItems: parseInt(customer.totalItems) || 0,
-                            phone1: customer.phone1?.toString() || '',
-                            phone2: customer.phone2?.toString() || '',
-                            customerType: customer.customerType?.toString() || 'רגיל'
+                            phone1: customer.phone1?.toString().trim() || '',
+                            phone2: customer.phone2?.toString().trim() || '',
+                            customerType: (customer.customerType?.toString() || 'רגיל').trim()
                         })).filter(customer => customer.id); // סינון רק לקוחות עם מזהה
                         
                         if (processedCustomers.length === 0) {
@@ -1908,8 +2111,10 @@ console.log(`📊 סיכום נתונים: ${customers.length} לקוחות ו-$
             currentStore = '';
             currentEmployee = '';
             currentRedemptions = [];
+            allCustomerPeriods = [];
             document.getElementById('customerIdInput').value = '';
             document.getElementById('customerInfo').style.display = 'none';
+            document.getElementById('periodSelection').style.display = 'none';
             document.getElementById('loginScreen').style.display = 'block';
             document.getElementById('mainScreen').style.display = 'none';
         }
@@ -1934,6 +2139,11 @@ console.log(`📊 סיכום נתונים: ${customers.length} לקוחות ו-$
         window.confirmImport = confirmImport;
         window.updatePreviewSummary = updatePreviewSummary;
         window.retryFailedCustomers = retryFailedCustomers;
+        window.displayPeriodSelection = displayPeriodSelection;
+        window.selectPeriod = selectPeriod;
+        window.loadAndDisplayCustomer = loadAndDisplayCustomer;
+        window.backToPeriods = backToPeriods;
+        window.updateBackToPeriodButton = updateBackToPeriodButton;
     </script>
 </body>
 </html>
