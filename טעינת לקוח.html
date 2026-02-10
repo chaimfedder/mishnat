@@ -631,6 +631,10 @@
             }
 
             isProcessing = true;
+            // הסתרת מסכים קודמים
+            document.getElementById('customerInfo').style.display = 'none';
+            document.getElementById('periodSelection').style.display = 'none';
+
             try {
                 // שאילתה ישירה לפי כל השדות המזהים בבת אחת
                 const structuredQuery = {
