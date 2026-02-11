@@ -736,9 +736,16 @@
         function loadSavedCredentials() {
             const storeName = localStorage.getItem('currentStore');
             const employeeName = localStorage.getItem('currentEmployee');
-            
+
             if (storeName && employeeName) {
-                // אם יש נתונים שמורים, בצע התחברות אוטומטית
+                // בדיקת תקינות - האם הערכים לא פגומים (סימני שאלה, תו replacement וכו')
+                const isCorrupted = (val) => /^[?\s\uFFFD]+$/.test(val) || val.includes('\uFFFD');
+                if (isCorrupted(storeName) || isCorrupted(employeeName)) {
+                    localStorage.removeItem('currentStore');
+                    localStorage.removeItem('currentEmployee');
+                    return;
+                }
+                // אם יש נתונים שמורים ותקינים, בצע התחברות אוטומטית
                 document.getElementById('storeNameInput').value = storeName;
                 document.getElementById('employeeNameInput').value = employeeName;
                 handleLogin();
