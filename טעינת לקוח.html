@@ -367,6 +367,83 @@
         }
 
         /* הגדרות מנהל - תקופה פעילה */
+
+        /* התראת שובר ישן */
+        .old-voucher-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .old-voucher-dialog {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            max-width: 420px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .old-voucher-icon {
+            font-size: 50px;
+            margin-bottom: 10px;
+        }
+
+        .old-voucher-title {
+            font-size: 28px;
+            font-weight: 800;
+            color: #dc2626;
+            margin: 0 0 16px 0;
+        }
+
+        .old-voucher-message {
+            font-size: 16px;
+            color: #444;
+            line-height: 1.7;
+            margin-bottom: 24px;
+        }
+
+        .old-voucher-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .old-voucher-buttons button {
+            flex: 1;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .old-voucher-confirm {
+            background: #16a34a;
+            color: white;
+            border: none;
+        }
+
+        .old-voucher-confirm:hover {
+            background: #15803d;
+        }
+
+        .old-voucher-cancel {
+            background: transparent;
+            color: #dc2626;
+            border: 2px solid #dc2626;
+        }
+
+        .old-voucher-cancel:hover {
+            background: #fef2f2;
+        }
+
         .admin-settings {
             background: #fafbfc;
             border: 1px solid #e2e8f0;
@@ -1110,11 +1187,44 @@
         async function selectPeriod(period) {
             // אם יש תקופה פעילה מוגדרת, ו-customerType של התקופה הנבחרת שונה ממנה - התראה
             if (activePeriod && period.customerType !== activePeriod) {
-                const confirmed = confirm(`⚠️ שובר ישן!\n\nהתקופה "${period.customerType}" אינה התקופה הפעילה (${activePeriod}).\n\nיש לוודא מול הלקוח שהשובר לא מומש.\n\nלהמשיך?`);
+                const confirmed = await showOldVoucherWarning();
                 if (!confirmed) return;
             }
             document.getElementById('periodSelection').style.display = 'none';
             await loadAndDisplayCustomer(period);
+        }
+
+        // הצגת התראת שובר ישן מעוצבת
+        function showOldVoucherWarning() {
+            return new Promise((resolve) => {
+                const overlay = document.createElement('div');
+                overlay.className = 'old-voucher-overlay';
+                overlay.innerHTML = `
+                    <div class="old-voucher-dialog">
+                        <div class="old-voucher-icon">&#9888;</div>
+                        <div class="old-voucher-title">שובר ישן!</div>
+                        <div class="old-voucher-message">
+                            השובר הוא שובר ישן.<br>
+                            לפני מימוש נא לוודא מול הלקוח שהשובר לא מומש בעבר.<br>
+                            אם לא מומש - ניתן לממש עכשיו.
+                        </div>
+                        <div class="old-voucher-buttons">
+                            <button class="old-voucher-confirm" id="oldVoucherConfirm">המשך למימוש</button>
+                            <button class="old-voucher-cancel" id="oldVoucherCancel">ביטול</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+
+                document.getElementById('oldVoucherConfirm').onclick = () => {
+                    overlay.remove();
+                    resolve(true);
+                };
+                document.getElementById('oldVoucherCancel').onclick = () => {
+                    overlay.remove();
+                    resolve(false);
+                };
+            });
         }
 
         // טעינה והצגה של לקוח ספציפי (תקופה ספציפית)
