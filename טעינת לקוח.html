@@ -617,7 +617,9 @@
             <div id="adminSettings" class="admin-settings" style="display: none;">
                 <h4>הגדרת תקופה פעילה</h4>
                 <div class="admin-settings-row">
-                    <input type="text" id="activePeriodInput" placeholder="למשל: פסח 2025" onkeydown="if(event.key==='Enter')saveActivePeriod()">
+                    <select id="activePeriodSelect">
+                        <option value="">טוען תקופות...</option>
+                    </select>
                     <button onclick="saveActivePeriod()">שמור</button>
                 </div>
                 <div id="activePeriodDisplay"></div>
@@ -794,9 +796,9 @@
 
         // שמירת תקופה פעילה ב-Firestore
         async function saveActivePeriod() {
-            const value = document.getElementById('activePeriodInput').value.trim();
+            const value = document.getElementById('activePeriodSelect').value;
             if (!value) {
-                showError('נא להזין שם תקופה');
+                showError('נא לבחור תקופה');
                 return;
             }
 
@@ -838,10 +840,54 @@
                 if (value) {
                     activePeriod = value;
                     displayActivePeriod(value);
-                    document.getElementById('activePeriodInput').value = value;
                 }
             } catch (error) {
                 console.error('Error loading active period:', error);
+            }
+        }
+
+        // טעינת רשימת סוגי לקוחות קיימים מ-Firestore לתוך ה-select
+        async function loadExistingCustomerTypes() {
+            const select = document.getElementById('activePeriodSelect');
+            if (!select) return;
+
+            try {
+                const query = {
+                    structuredQuery: {
+                        from: [{ collectionId: 'customers' }],
+                        select: { fields: [{ fieldPath: 'customerType' }] },
+                        limit: 5000
+                    }
+                };
+
+                const response = await fetch(`${FIRESTORE_URL}:runQuery`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(query)
+                });
+
+                const results = await response.json();
+                const types = new Set();
+
+                results.forEach(result => {
+                    if (result.document) {
+                        const type = result.document.fields?.customerType?.stringValue || 'רגיל';
+                        types.add(type);
+                    }
+                });
+
+                select.innerHTML = '<option value="">בחר תקופה...</option>';
+                [...types].sort().forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type;
+                    option.textContent = type;
+                    if (type === activePeriod) option.selected = true;
+                    select.appendChild(option);
+                });
+
+            } catch (error) {
+                console.error('Error loading customer types:', error);
+                select.innerHTML = '<option value="">שגיאה בטעינת תקופות</option>';
             }
         }
 
@@ -902,15 +948,15 @@
                 adminButtons.style.display = 'flex';
                 adminSettings.style.display = 'block';
                 regularButtons.style.display = 'none';
-                loadActivePeriod();
+                // טעינת התקופה הפעילה ואחר כך רשימת התקופות הקיימות
+                loadActivePeriod().then(() => loadExistingCustomerTypes());
             } else {
                 adminButtons.style.display = 'none';
                 adminSettings.style.display = 'none';
                 regularButtons.style.display = 'block';
+                // טעינת התקופה הפעילה (לכל המשתמשים, לצורך בדיקת שובר ישן)
+                loadActivePeriod();
             }
-
-            // טעינת התקופה הפעילה (לכל המשתמשים, לצורך בדיקת שובר ישן)
-            loadActivePeriod();
 
             // התחלת עדכון שעון
             updateClock();
@@ -2304,6 +2350,7 @@ console.log(`📊 סיכום נתונים: ${customers.length} לקוחות ו-$
         window.updateBackToPeriodButton = updateBackToPeriodButton;
         window.saveActivePeriod = saveActivePeriod;
         window.loadActivePeriod = loadActivePeriod;
+        window.loadExistingCustomerTypes = loadExistingCustomerTypes;
     </script>
 </body>
 </html>
