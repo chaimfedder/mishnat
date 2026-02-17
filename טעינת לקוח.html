@@ -366,6 +366,48 @@
             background: #f0f4ff;
         }
 
+        /* הגדרות מנהל - תקופה פעילה */
+        .admin-settings {
+            background: #fafbfc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 15px;
+        }
+
+        .admin-settings h4 {
+            margin: 0 0 12px 0;
+            color: #1e3a5f;
+            font-size: 15px;
+        }
+
+        .admin-settings-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .admin-settings-row input {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .admin-settings-row button {
+            width: auto;
+            white-space: nowrap;
+        }
+
+        .active-period-badge {
+            display: inline-block;
+            background: #f0fdf4;
+            color: #16a34a;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
         /* התאמה לסלולר - מסכי מימוש */
         @media (max-width: 600px) {
             body {
@@ -448,6 +490,14 @@
             .back-to-periods-btn {
                 font-size: 14px;
                 padding: 10px 16px;
+            }
+
+            .admin-settings-row {
+                flex-direction: column;
+            }
+
+            .admin-settings-row button {
+                width: 100%;
             }
         }
     </style>
@@ -564,6 +614,14 @@
                     החלפת משמרת
                 </button>
             </div>
+            <div id="adminSettings" class="admin-settings" style="display: none;">
+                <h4>הגדרת תקופה פעילה</h4>
+                <div class="admin-settings-row">
+                    <input type="text" id="activePeriodInput" placeholder="למשל: פסח 2025" onkeydown="if(event.key==='Enter')saveActivePeriod()">
+                    <button onclick="saveActivePeriod()">שמור</button>
+                </div>
+                <div id="activePeriodDisplay"></div>
+            </div>
             <div id="regularButtons" style="text-align: left;">
                 <button onclick="handleLogout()" class="secondary">
                     החלפת משמרת
@@ -641,6 +699,7 @@
         let parsedCustomers = []; // הלקוחות שנקראו מהקובץ
         let existingCustomersMap = {}; // מיפוי של לקוחות קיימים
         let allCustomerPeriods = []; // כל התקופות שנמצאו בחיפוש
+        let activePeriod = ''; // התקופה הפעילה כפי שהוגדרה ע"י המנהל
 
         // הוסף כאן - קוד ניטור קריאות פיירסטור
         let firebaseReadCount = 0;
@@ -733,6 +792,67 @@
             localStorage.setItem('currentEmployee', employeeName);
         }
 
+        // שמירת תקופה פעילה ב-Firestore
+        async function saveActivePeriod() {
+            const value = document.getElementById('activePeriodInput').value.trim();
+            if (!value) {
+                showError('נא להזין שם תקופה');
+                return;
+            }
+
+            try {
+                const doc = {
+                    fields: {
+                        value: { stringValue: value }
+                    }
+                };
+
+                const response = await fetch(
+                    `${FIRESTORE_URL}/settings/activePeriod`,
+                    {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(doc)
+                    }
+                );
+
+                if (!response.ok) throw new Error('שגיאה בשמירה');
+
+                activePeriod = value;
+                displayActivePeriod(value);
+                showSuccess(`התקופה הפעילה עודכנה ל: ${value}`);
+            } catch (error) {
+                console.error('Error saving active period:', error);
+                showError('שגיאה בשמירת התקופה הפעילה');
+            }
+        }
+
+        // טעינת תקופה פעילה מ-Firestore
+        async function loadActivePeriod() {
+            try {
+                const response = await fetch(`${FIRESTORE_URL}/settings/activePeriod`);
+                if (!response.ok) return;
+
+                const data = await response.json();
+                const value = data.fields?.value?.stringValue || '';
+                if (value) {
+                    activePeriod = value;
+                    displayActivePeriod(value);
+                    document.getElementById('activePeriodInput').value = value;
+                }
+            } catch (error) {
+                console.error('Error loading active period:', error);
+            }
+        }
+
+        // הצגת התקופה הפעילה
+        function displayActivePeriod(value) {
+            const display = document.getElementById('activePeriodDisplay');
+            if (display) {
+                display.innerHTML = `<span class="active-period-badge">תקופה פעילה: ${value}</span>`;
+            }
+        }
+
         function loadSavedCredentials() {
             const storeName = localStorage.getItem('currentStore');
             const employeeName = localStorage.getItem('currentEmployee');
@@ -777,13 +897,20 @@
             // קוד חדש שמציג/מסתיר כפתורים
             const adminButtons = document.getElementById('adminButtons');
             const regularButtons = document.getElementById('regularButtons');
+            const adminSettings = document.getElementById('adminSettings');
             if (isAdmin(storeName, employeeName)) {
                 adminButtons.style.display = 'flex';
+                adminSettings.style.display = 'block';
                 regularButtons.style.display = 'none';
+                loadActivePeriod();
             } else {
                 adminButtons.style.display = 'none';
+                adminSettings.style.display = 'none';
                 regularButtons.style.display = 'block';
             }
+
+            // טעינת התקופה הפעילה (לכל המשתמשים, לצורך בדיקת שובר ישן)
+            loadActivePeriod();
 
             // התחלת עדכון שעון
             updateClock();
@@ -935,6 +1062,11 @@
 
         // בחירת תקופה מהמסך
         async function selectPeriod(period) {
+            // אם יש תקופה פעילה מוגדרת, ו-customerType של התקופה הנבחרת שונה ממנה - התראה
+            if (activePeriod && period.customerType !== activePeriod) {
+                const confirmed = confirm(`⚠️ שובר ישן!\n\nהתקופה "${period.customerType}" אינה התקופה הפעילה (${activePeriod}).\n\nיש לוודא מול הלקוח שהשובר לא מומש.\n\nלהמשיך?`);
+                if (!confirmed) return;
+            }
             document.getElementById('periodSelection').style.display = 'none';
             await loadAndDisplayCustomer(period);
         }
@@ -2140,6 +2272,7 @@ console.log(`📊 סיכום נתונים: ${customers.length} לקוחות ו-$
             document.getElementById('customerIdInput').value = '';
             document.getElementById('customerInfo').style.display = 'none';
             document.getElementById('periodSelection').style.display = 'none';
+            document.getElementById('adminSettings').style.display = 'none';
             document.getElementById('loginScreen').style.display = 'block';
             document.getElementById('mainScreen').style.display = 'none';
         }
@@ -2169,6 +2302,8 @@ console.log(`📊 סיכום נתונים: ${customers.length} לקוחות ו-$
         window.loadAndDisplayCustomer = loadAndDisplayCustomer;
         window.backToPeriods = backToPeriods;
         window.updateBackToPeriodButton = updateBackToPeriodButton;
+        window.saveActivePeriod = saveActivePeriod;
+        window.loadActivePeriod = loadActivePeriod;
     </script>
 </body>
 </html>
